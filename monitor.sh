@@ -3,10 +3,12 @@
 DEFAULT_INTERVAL=30
 FS_RECORD='filesystem.log'
 PAGE_SIZE_K=$(($(getconf PAGE_SIZE) / 0x400))
+WORKDIR=$(cd `dirname "$0"`; pwd)
+declare -a PROCESS=('pro1' 'pro 2')
 
 function init {
-	ARGS=$(getopt -o ht:p:o: --long help --long interval-time: --long process-name:\
-		--long outdir: -n "$0" -- "$@")
+	ARGS=$(getopt -o ht:p:o: --long help --long interval-time: \
+		--long process-name: --long outdir: -n "$0" -- "$@")
 
 	if [ $? != 0 ]; then
 		usage
@@ -19,7 +21,7 @@ function init {
 		case "$1" in
 			-h|--help) : ${HELP:=1}; shift;;
 			-t|--interval-time) INTERVAL=$2; shift 2;;
-			-p|--process-name) PROCESS=$PROCESS' '$2; shift 2;;
+			-p|--process-name) PROCESS[${#PROCESS[*]}]=$2; shift 2;;
 			-o|--outdir) OUTDIR=$2; shift 2;;
 			--) shift; break;;
 			*) echo "Internal error."; exit 1;;
@@ -32,7 +34,9 @@ function init {
 	fi
 
 	: ${INTERVAL:=${DEFAULT_INTERVAL}}
-	: ${PROCESS:=''}
+	: ${OUTDIR:=${WORKDIR}/monitor-out}
+
+	[ ! -d ${OUTDIR} ] && mkdir -p ${OUTDIR}
 }
 
 function usage {
@@ -44,6 +48,7 @@ Usage:
 	  -h, --help
 	  -t <second>, --interval-time <second>
 	  -p <process-name>, --process-name <process-name>
+	  -o <output-dir>, --outdir <output-dir>
 EOF
 
 	if [[ $# > 0 ]]; then
@@ -60,18 +65,22 @@ Options:
 	-p <process-name>, --process-name <process-name>
 		Specify the name of the process to monitor.
 		Default is empty.
+
+	-o <output-dir>, --outdir <output-dir>
+		Specify the output directory.
+		Default is {CURRENT-DIR}/monitor-out
 EOF
 	fi
 }
 
 function filesystem_monitor {
-	if [ ! -r "$FS_RECORD" ]; then
-		echo 'Date,Second,Filesystem,Size,Used,Avail,Use%,MountPoint'
+	if [ ! -r "${OUTDIR}/$FS_RECORD" ]; then
+		echo 'Date,Time,Filesystem,Size,Used,Avail,Use%,MountPoint' > "${OUTDIR}/${FS_RECORD}"
 	fi
 
 	for _data in $(df | sed '1d' | grep -v -P 'none|udev|tmpfs' | \
 		awk 'BEGIN{OFS=","}{print $1,$2,$3,$4,$5,$6}'); do
-		echo "${current_date},${current_second},${_data}"
+		echo "${current_date},${current_second},${_data}" >> "${OUTDIR}/${FS_RECORD}"
 	done
 }
 
@@ -82,8 +91,9 @@ function system_process_monitor {
 	local _data="${current_date},${current_second},\"${_pro_name}\""
 
 	if [ "$_pro_name" == "SYSTEM" ]; then
-		if [ ! -r "${_pro_name}.log" ]; then
-			echo 'Date,Time,Porcess,cpu,mem_total,mem_used,swap_total,swap_used'
+		if [ ! -r "${OUTDIR}/${_pro_name}.log" ]; then
+			echo 'Date,Time,Porcess,cpu,mem_total,mem_used,swap_total,swap_used' \
+				> "${OUTDIR}/${_pro_name}.log"
 		fi
 
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "MemTotal:"{print $2}')"
@@ -91,10 +101,11 @@ function system_process_monitor {
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "SwapTotal:"{print $2}')"
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "SwapCached:"{print $2}')"
 
-		echo ${_data}
+		echo ${_data} >> "${OUTDIR}/${_pro_name}.log"
 	else
-		if [ ! -r "${_pro_name}.log" ]; then
-			echo 'Date,Time,Process,Args,PID,CPU%,Mem%,Mem(RSS in kB),VMem(VSZ in kB),SWAP(kB)'
+		if [ ! -r "${OUTDIR}/${_pro_name}.log" ]; then
+			echo 'Date,Time,Process,Args,PID,CPU%,Mem%,Mem(RSS in kB),VMem(VSZ in kB),SWAP(kB)' \
+				> "${OUTDIR}/${_pro_name}.log"
 		fi
 
 		process_monitor "${_pro_name}" "${_data}"
@@ -105,34 +116,53 @@ function process_monitor {
 	local _pro_name=$1
 	local _data=$2
 
-	_pro_name=$(echo "${_pro_name}" | sed 's/\./\\./g')
+	__pro_name=$(echo "${_pro_name}" | sed 's/\./\\./g')
 
-	for _pid in $(pgrep "^${_pro_name}\$"); do
-		local __data=${_data}
+	if pgrep "^${__pro_name}\$" > /dev/null; then
+		for _pid in $(pgrep "^${__pro_name}\$"); do
+			local __data=${_data}
 
-		__data="${__data},\""$(ps -p ${_pid} -o 'args' | sed '1d')'"'
-		__data="${__data},${_pid}"
-		__data="${__data},$(ps -p ${_pid} -o 'pcpu' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
-		__data="${__data},$(ps -p ${_pid} -o 'pmem' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
-		__data="${__data},$(ps -p ${_pid} -o 'rss' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-		__data="${__data},$(ps -p ${_pid} -o 'vsz' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-		__data="${__data},$(awk '/Swap:/{a=a+$2}END{print a}' /proc/${_pid}/smaps)"
+			__data="${__data},\""$(ps -p ${_pid} -o 'args' | sed '1d')'"'
+			__data="${__data},${_pid}"
+			__data="${__data},$(ps -p ${_pid} -o 'pcpu' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
+			__data="${__data},$(ps -p ${_pid} -o 'pmem' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
+			__data="${__data},$(ps -p ${_pid} -o 'rss' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+			__data="${__data},$(ps -p ${_pid} -o 'vsz' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+			__data="${__data},$(awk '/Swap:/{a=a+$2}END{print a}' /proc/${_pid}/smaps)"
 
-		echo ${__data}
-	done
+			echo "${__data}" >> "${OUTDIR}/${_pro_name}.log"
+		done
+	else
+		echo "${_data},,<NO SUCH PROCESS>,,,,,," >> "${OUTDIR}/${_pro_name}.log"
+	fi
 }
 
 init $@
 
-current_date=$(date +"%Y-%m-%d.%H:%M:%S")
+last_checked_time=0
+checked=0
+while [ 1 ]; do
+	current_date=$(date +"%Y-%m-%d.%H:%M:%S")
+	current_second=$(date +"%s")
+	#current_second=$(date +"%s.%N" | sed 's/\(\.[0-9][0-9][0-9]\).*/\1/')
 
-current_second=$(date +"%s")
-#current_second=$(date +"%s.%N" | sed 's/\(\.[0-9][0-9][0-9]\).*/\1/')
+	# We check the time every second
+	if [ $current_second -ge $((${last_checked_time} + ${INTERVAL})) ] && [ 0 -eq ${checked} ]; then
+		echo "[$current_date] Starting monitor."
 
-filesystem_monitor "${current_time}"
+		filesystem_monitor
+		system_process_monitor 'SYSTEM'
 
-system_process_monitor 'SYSTEM'
+		for ((i=0; i<${#PROCESS[*]}; i++)); do
+			system_process_monitor "${PROCESS[$i]}"
+		done
 
-system_process_monitor "${PROCESS}"
+		checked=1
+		last_checked_time=${current_second}
+	else
+		sleep 1
+		checked=0
+	fi
+done
 
 exit 0
