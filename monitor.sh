@@ -5,8 +5,8 @@ FS_RECORD='filesystem.log'
 PAGE_SIZE_K=$(($(getconf PAGE_SIZE) / 0x400))
 
 function init {
-	ARGS=$(getopt -o ht:p: --long help --long interval-time: --long process-name:\
-		-n "$0" -- "$@")
+	ARGS=$(getopt -o ht:p:o: --long help --long interval-time: --long process-name:\
+		--long outdir: -n "$0" -- "$@")
 
 	if [ $? != 0 ]; then
 		usage
@@ -20,6 +20,7 @@ function init {
 			-h|--help) : ${HELP:=1}; shift;;
 			-t|--interval-time) INTERVAL=$2; shift 2;;
 			-p|--process-name) PROCESS=$PROCESS' '$2; shift 2;;
+			-o|--outdir) OUTDIR=$2; shift 2;;
 			--) shift; break;;
 			*) echo "Internal error."; exit 1;;
 		esac
@@ -35,7 +36,7 @@ function init {
 }
 
 function usage {
-    cat <<EOF
+	cat <<EOF
 Usage:
 	$0 [options]
 
@@ -45,7 +46,7 @@ Usage:
 	  -p <process-name>, --process-name <process-name>
 EOF
 
-    if [[ $# > 0 ]]; then
+	if [[ $# > 0 ]]; then
 cat <<EOF
 
 Options:
@@ -60,7 +61,7 @@ Options:
 		Specify the name of the process to monitor.
 		Default is empty.
 EOF
-    fi
+	fi
 }
 
 function filesystem_monitor {
@@ -77,69 +78,61 @@ function filesystem_monitor {
 function system_process_monitor {
 	local _pro_name=$1
 
-	local _data="${current_date},${current_second},${_pro_name}"
+	_pro_name=$(echo "${_pro_name}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+	local _data="${current_date},${current_second},\"${_pro_name}\""
 
 	if [ "$_pro_name" == "SYSTEM" ]; then
 		if [ ! -r "${_pro_name}.log" ]; then
 			echo 'Date,Time,Porcess,cpu,mem_total,mem_used,swap_total,swap_used'
 		fi
 
-		local _mem_total=$(cat /proc/meminfo | grep -P '^MemTotal:' | awk '{print $2}')
-		_data="${_data},${_mem_total}"
-		local _mem_used=$(cat /proc/meminfo | grep -P '^MemAvailable:' | awk '{print $2}')
-		_data="${_data},${_mem_used}"
-		local _swap_total=$(cat /proc/meminfo | grep -P '^SwapTotal:' | awk '{print $2}')
-		_data="${_data},${_swap_total}"
-		local _swap_used=$(cat /proc/meminfo | grep -P '^SwapTotal:' | awk '{print $2}')
-		_data="${_data},${_swap_used}"
+		_data="${_data},$(cat /proc/meminfo | awk '$1 == "MemTotal:"{print $2}')"
+		_data="${_data},$(cat /proc/meminfo | awk '$1 == "MemAvailable:"{print $2}')"
+		_data="${_data},$(cat /proc/meminfo | awk '$1 == "SwapTotal:"{print $2}')"
+		_data="${_data},$(cat /proc/meminfo | awk '$1 == "SwapCached:"{print $2}')"
+
+		echo ${_data}
 	else
 		if [ ! -r "${_pro_name}.log" ]; then
-			echo 'Date,Time,Process,Args,PID,CPU%,Mem,VMem,SWAP'
-			_data="${_data},"$(process_monitor "${_pro_name}")
+			echo 'Date,Time,Process,Args,PID,CPU%,Mem%,Mem(RSS in kB),VMem(VSZ in kB),SWAP(kB)'
 		fi
-	fi
 
-	echo ${_data}
+		process_monitor "${_pro_name}" "${_data}"
+	fi
 }
 
 function process_monitor {
 	local _pro_name=$1
+	local _data=$2
 
-	
+	_pro_name=$(echo "${_pro_name}" | sed 's/\./\\./g')
+
+	for _pid in $(pgrep "^${_pro_name}\$"); do
+		local __data=${_data}
+
+		__data="${__data},\""$(ps -p ${_pid} -o 'args' | sed '1d')'"'
+		__data="${__data},${_pid}"
+		__data="${__data},$(ps -p ${_pid} -o 'pcpu' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
+		__data="${__data},$(ps -p ${_pid} -o 'pmem' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')%"
+		__data="${__data},$(ps -p ${_pid} -o 'rss' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+		__data="${__data},$(ps -p ${_pid} -o 'vsz' | sed -e '1d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+		__data="${__data},$(awk '/Swap:/{a=a+$2}END{print a}' /proc/${_pid}/smaps)"
+
+		echo ${__data}
+	done
 }
 
 init $@
 
 current_date=$(date +"%Y-%m-%d.%H:%M:%S")
+
 current_second=$(date +"%s")
 #current_second=$(date +"%s.%N" | sed 's/\(\.[0-9][0-9][0-9]\).*/\1/')
 
-#filesystem_monitor "${current_time}"
+filesystem_monitor "${current_time}"
 
-#system_process_monitor 'SYSTEM'
+system_process_monitor 'SYSTEM'
 
-system_process_monitor 'tmux'
+system_process_monitor "${PROCESS}"
 
 exit 0
-
-echo 'Porcess,time,cpu,mem_total,mem_used,vmem,swap'
-
-CPULOG_1=$(cat /proc/stat | grep 'cpu ' | awk '{print $2" "$3" "$4" "$5" "$6" "$7" "$8}')
-SYS_IDLE_1=$(echo $CPULOG_1 | awk '{print $4}')
-Total_1=$(echo $CPULOG_1 | awk '{print $1+$2+$3+$4+$5+$6+$7}')
-
-sleep 5
-
-CPULOG_2=$(cat /proc/stat | grep 'cpu ' | awk '{print $2" "$3" "$4" "$5" "$6" "$7" "$8}')
-SYS_IDLE_2=$(echo $CPULOG_2 | awk '{print $4}')
-Total_2=$(echo $CPULOG_2 | awk '{print $1+$2+$3+$4+$5+$6+$7}')
-
-SYS_IDLE=`expr $SYS_IDLE_2 - $SYS_IDLE_1`
-
-Total=`expr $Total_2 - $Total_1`
-SYS_USAGE=`expr $SYS_IDLE/$Total*100 |bc -l`
-
-SYS_Rate=`expr 100-$SYS_USAGE |bc -l`
-
-Disp_SYS_Rate=`expr "scale=3; $SYS_Rate/1" |bc`
-echo $Disp_SYS_Rate%
