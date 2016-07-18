@@ -4,7 +4,7 @@ DEFAULT_INTERVAL=30
 FS_RECORD='filesystem.csv'
 PAGE_SIZE_K=$(($(getconf PAGE_SIZE) / 0x400))
 WORKDIR=$(cd `dirname "$0"`; pwd)
-declare -a PROCESS=('pro1' 'pro 2')
+declare -a PROCESS=()
 
 function init {
 	ARGS=$(getopt -o ht:p:o: --long help --long interval-time: \
@@ -147,8 +147,8 @@ function process_monitor {
 
 	__pro_name=$(echo "${_pro_name}" | sed 's/\./\\./g')
 
-	if pgrep "^${__pro_name}\$" > /dev/null; then
-		for _pid in $(pgrep "^${__pro_name}\$"); do
+	if pgrep "${__pro_name}" > /dev/null; then
+		for _pid in $(pgrep "${__pro_name}"); do
 			local __data=${_data}
 
 			__data="${__data},\""$(ps -p ${_pid} -o 'args' | sed '1d')'"'
