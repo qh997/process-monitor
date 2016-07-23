@@ -78,7 +78,7 @@ function filesystem_monitor {
 		echo 'Date,Time,Filesystem,Size,Used,Avail,Use%,MountPoint' > "${OUTDIR}/${FS_RECORD}"
 	fi
 
-	for _data in $(df | sed '1d' | grep -v -P 'none|udev|tmpfs' | \
+	for _data in $(df -P | sed '1d' | grep -v -P 'none|udev|tmpfs' | \
 		awk 'BEGIN{OFS=","}{print $1,$2,$3,$4,$5,$6}'); do
 		echo "${current_date},${current_second},${_data}" >> "${OUTDIR}/${FS_RECORD}"
 	done
@@ -114,7 +114,7 @@ function system_process_monitor {
 }
 
 function system_pcpu {
-	cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
+#	cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
 	cpu_idle=$(echo $cpu_s | awk 'BEGIN{FS=",";OFS="\n"}{NF=NF; print}' | awk '$3 ~ "id"{print $2}')
 	echo $(echo "scale=3; 100 - ${cpu_idle}" | bc)
 }
@@ -146,6 +146,8 @@ function process_monitor {
 
 init $@
 
+cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
+
 last_checked_time=0
 checked=0
 while [ 1 ]; do
@@ -167,7 +169,8 @@ while [ 1 ]; do
 		checked=1
 		last_checked_time=${current_second}
 	else
-		sleep 1
+#		sleep 1
+		cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
 		checked=0
 	fi
 done
