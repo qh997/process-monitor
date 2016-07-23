@@ -96,7 +96,7 @@ function system_process_monitor {
 				> "${OUTDIR}/${_pro_name}.csv"
 		fi
 
-		_data="${_data},"
+		_data="${_data},$(system_pcpu)%"
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "MemTotal:"{print $2}')"
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "MemAvailable:"{print $2}')"
 		_data="${_data},$(cat /proc/meminfo | awk '$1 == "SwapTotal:"{print $2}')"
@@ -114,31 +114,9 @@ function system_process_monitor {
 }
 
 function system_pcpu {
-	CPULOG_1=$(cat '/proc/stat' | awk '$1 == "cpu"{print $2" "$3" "$4" "$5" "$6" "$7" "$8}')
-	echo CPULOG_1 = $CPULOG_1
-	echo CPULOG_0 = $CPULOG_0
-	SYS_IDLE_1=$(echo "$CPULOG_1" | awk '{print $4}')
-	echo SYS_IDLE_1 = $SYS_IDLE_1
-	echo SYS_IDLE_0 = $SYS_IDLE_0
-	Total_1=$(echo "$CPULOG_1" | awk '{print $1+$2+$3+$4+$5+$6+$7}')
-	echo Total_1 = $Total_1
-	echo Total_0 = $Total_0
-
-	SYS_IDLE=$(($SYS_IDLE_1 - $SYS_IDLE_0))
-	echo SYS_IDLE = $SYS_IDLE
-	Total=$(($Total_1 - $Total_0))
-	echo Total = $Total
-	SYS_USAGE=$(($SYS_IDLE / $Total * 100))
-	echo SYS_USAGE = $SYS_USAGE
-	SYS_Rate=$((100 - $SYS_USAGE))
-	echo SYS_Rate = $SYS_Rate
-	Disp_SYS_Rate=`expr "scale=2; $SYS_Rate/1" |bc`
-	echo Disp_SYS_Rate = $Disp_SYS_Rate
-	echo $Disp_SYS_Rate%
-
-	CPULOG_0=${CPULOG_1}
-	SYS_IDLE_0=${SYS_IDLE_1}
-	Total_0=${Total_1}
+	cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
+	cpu_idle=$(echo $cpu_s | awk 'BEGIN{FS=",";OFS="\n"}{NF=NF; print}' | awk '$3 ~ "id"{print $2}')
+	echo $(echo "scale=3; 100 - ${cpu_idle}" | bc)
 }
 
 function process_monitor {
@@ -167,11 +145,6 @@ function process_monitor {
 }
 
 init $@
-
-# CPULOG_0=$(cat '/proc/stat' | awk '$1 == "cpu"{print $2" "$3" "$4" "$5" "$6" "$7" "$8}')
-# SYS_IDLE_0=$(echo $CPULOG_0 | awk '{print $4}')
-# Total_0=$(echo $CPULOG_0 | awk '{print $1+$2+$3+$4+$5+$6+$7}')
-# sleep 1
 
 last_checked_time=0
 checked=0
