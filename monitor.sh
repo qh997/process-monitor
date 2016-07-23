@@ -114,7 +114,7 @@ function system_process_monitor {
 }
 
 function system_pcpu {
-#	cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
+	cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
 	cpu_idle=$(echo $cpu_s | awk 'BEGIN{FS=",";OFS="\n"}{NF=NF; print}' | awk '$3 ~ "id"{print $2}')
 	echo $(echo "scale=3; 100 - ${cpu_idle}" | bc)
 }
@@ -146,8 +146,6 @@ function process_monitor {
 
 init $@
 
-cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
-
 last_checked_time=0
 checked=0
 while [ 1 ]; do
@@ -169,8 +167,7 @@ while [ 1 ]; do
 		checked=1
 		last_checked_time=${current_second}
 	else
-#		sleep 1
-		cpu_s=$(top -n 2 | awk -F: '$1 ~ /Cpu/{print $2}' | sed -n '$p')
+		sleep 1
 		checked=0
 	fi
 done
